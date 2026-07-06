@@ -8,15 +8,16 @@ import { bridge } from './bridge.js';
 
 let ctx = null, master = null;
 let chargeOsc = null, chargeGain = null;
+let volume = 0.22;   // user-selected master volume (0 = sound off)
 
 function ensure() {
-  if (!bridge.audioEnabled) return null;
+  if (!bridge.audioEnabled || volume <= 0) return null;
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     ctx = new AC();
     master = ctx.createGain();
-    master.gain.value = 0.22;
+    master.gain.value = volume;
     master.connect(ctx.destination);
   }
   if (ctx.state === 'suspended') { try { ctx.resume(); } catch (_) {} }
@@ -71,5 +72,12 @@ export const sfx = {
   setEnabled(on) {
     if (!on) { this.chargeStop(); if (ctx) { try { ctx.suspend(); } catch (_) {} } }
     else if (ctx) { try { ctx.resume(); } catch (_) {} }
+  },
+
+  // User-selected master volume (title-screen selector). 0 mutes everything.
+  setVolume(v) {
+    volume = v;
+    if (master) master.gain.value = v;
+    if (v <= 0) this.chargeStop();
   },
 };

@@ -4,10 +4,10 @@
 // Units are world "units"; U (px per unit) is derived at runtime.
 // ============================================================
 export const CONFIG = {
-  // --- jump model ---
-  g:      40,   // gravity (u/s^2), applied manually
-  vyMin:  8,    // jump initial speed at charge 0 (tap)   -> d = v * 2*Vy/g
-  vyMax:  24,   // jump initial speed at full charge (high arcs)
+  // --- jump model (low gravity = floaty hang time) ---
+  g:      25,   // gravity (u/s^2), applied manually
+  vyMin:  6.5,  // jump initial speed at charge 0 (tap)   -> d = v * 2*Vy/g
+  vyMax:  19,   // jump initial speed at full charge (same apex as before, ~27% more airtime)
   chargeT:1.0,  // seconds to reach full charge (long, readable gauge)
   baseV:  5,    // scroll speed at level 1 (u/s)
 

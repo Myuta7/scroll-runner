@@ -47,6 +47,12 @@ let shake = 0, flash = 0, dust = [];
 let levelFlash = 0;      // level-up palette flash + label timer
 let deadCooldown = 0;    // input lockout right after death (no accidental retry)
 let loadProgress = 0;    // 0..1 for the loading screen
+
+// sound volume selector (title screen): OFF / small / medium / large
+const VOL_LEVELS = [0, 0.10, 0.22, 0.45];
+const VOL_LABELS = ['OFF', 'LOW', 'MID', 'HIGH'];
+let volIndex = 2;
+let volBtns = [];        // hit rects in internal canvas px, rebuilt each title frame
 const sprites = { idle: null, right: null, left: null, jump: null };
 
 const lerp  = (a, b, t) => a + (b - a) * t;
@@ -137,7 +143,25 @@ function release() {
     player.grounded = false; player.charging = false; player.cur = null; player.charge = 0;
   } else { if (player) player.charging = false; sfx.chargeStop(); }
 }
-cv.addEventListener('pointerdown', e => { e.preventDefault(); press(); });
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  // title screen: taps on the volume buttons change volume instead of starting
+  if (state === 'title' && volBtns.length) {
+    const r = cv.getBoundingClientRect();
+    const px = (e.clientX - r.left) * (cv.width / r.width);
+    const py = (e.clientY - r.top) * (cv.height / r.height);
+    for (const b of volBtns) {
+      if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+        volIndex = b.i;
+        sfx.setVolume(VOL_LEVELS[volIndex]);
+        sfx.unlock(); sfx.perfect();   // audible feedback at the new volume
+        bridge.save(JSON.stringify({ best, vol: volIndex }));
+        return;
+      }
+    }
+  }
+  press();
+});
 window.addEventListener('pointerup', release);
 cv.addEventListener('pointercancel', release);
 window.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) press(); } });
@@ -209,12 +233,34 @@ function die() {
   shake = 1;
   sfx.die();
   bridge.sendScore(score);                 // score of THIS play (Playables semantics)
-  bridge.save(JSON.stringify({ best }));   // persist high score
+  bridge.save(JSON.stringify({ best, vol: volIndex }));   // persist high score + volume
 }
 
 // ---- render ------------------------------------------------------------
 const sx = wx => Math.round((wx - cameraX) * U);
 const sy = wy => Math.round(CH - wy * U);
+
+// Day-night cycle: sky shifts with level progress
+// night -> dawn -> morning -> noon -> evening -> night (repeats every 6 levels)
+const SKY_PHASES = [
+  ['#1a1c2c', '#29366f', '#333c57'], // night
+  ['#29366f', '#5d275d', '#b13e53'], // dawn (早朝)
+  ['#3b5dc9', '#41a6f6', '#73eff7'], // morning (朝)
+  ['#41a6f6', '#73eff7', '#94b0c2'], // noon (昼)
+  ['#5d275d', '#b13e53', '#ef7d57'], // evening (夕方)
+].map(ph => ph.map(h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]));
+const N_PHASES = SKY_PHASES.length;
+
+function skyColors() {
+  // continuous position: whole levels + progress inside the current level
+  const prog = (level - 1) + (cleared % C.levelEvery) / C.levelEvery;
+  const i = Math.floor(prog) % N_PHASES, j = (i + 1) % N_PHASES;
+  const t = prog - Math.floor(prog);
+  return SKY_PHASES[i].map((c, k) => {
+    const d = SKY_PHASES[j][k];
+    return `rgb(${Math.round(lerp(c[0], d[0], t))},${Math.round(lerp(c[1], d[1], t))},${Math.round(lerp(c[2], d[2], t))})`;
+  });
+}
 
 function pickFrame() {
   if (state !== 'play') return sprites.idle;
@@ -223,10 +269,11 @@ function pickFrame() {
 }
 
 function render() {
-  // sky: three flat pixel bands (positions relative to canvas height)
-  ctx.fillStyle = PAL.c08; ctx.fillRect(0, 0, CW, CH * 0.55);
-  ctx.fillStyle = PAL.c09; ctx.fillRect(0, CH * 0.55, CW, CH * 0.20);
-  ctx.fillStyle = PAL.c14; ctx.fillRect(0, CH * 0.75, CW, CH * 0.25);
+  // sky: three flat bands, colors follow the day-night cycle
+  const [skyTop, skyMid, skyLow] = skyColors();
+  ctx.fillStyle = skyTop; ctx.fillRect(0, 0, CW, CH * 0.55);
+  ctx.fillStyle = skyMid; ctx.fillRect(0, CH * 0.55, CW, CH * 0.20);
+  ctx.fillStyle = skyLow; ctx.fillRect(0, CH * 0.75, CW, CH * 0.25);
   // far parallax blocks
   ctx.fillStyle = PAL.c15;
   const bw = Math.round(2.8 * U), by = sy(1.6);
@@ -327,8 +374,31 @@ function render() {
     } else {
       ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, CH * 0.36 + fs * 2);
       ctx.fillStyle = PAL.c11; ctx.fillText('TAP / SPACE TO START', CW / 2, CH * 0.36 + fs * 3.4);
+      renderVolumeButtons(fs);
     }
     ctx.textAlign = 'left';
+  }
+}
+
+// SOUND: [OFF] [LOW] [MID] [HIGH] — selected one highlighted
+function renderVolumeButtons(fs) {
+  const bw = Math.round(fs * 3.6), bh = Math.round(fs * 1.7);
+  const gap = Math.max(2, Math.round(fs * 0.4));
+  const totW = bw * 4 + gap * 3;
+  let bx = Math.round((CW - totW) / 2);
+  const by = Math.round(CH * 0.36 + fs * 5.4);
+  volBtns.length = 0;
+  ctx.font = `${Math.max(6, Math.round(fs * 0.6))}px "PressStart2P", monospace`;
+  ctx.fillStyle = PAL.c13;
+  ctx.fillText('SOUND', CW / 2, by - Math.round(fs * 1.0));
+  for (let i = 0; i < 4; i++) {
+    const sel = i === volIndex;
+    ctx.fillStyle = sel ? PAL.c04 : PAL.c15;
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = sel ? PAL.c00 : PAL.c13;
+    ctx.fillText(VOL_LABELS[i], bx + Math.round(bw / 2), by + Math.round(bh / 2 - fs * 0.3));
+    volBtns.push({ x: bx, y: by, w: bw, h: bh, i });
+    bx += bw + gap;
   }
 }
 
@@ -381,7 +451,7 @@ function loadSprite(name) {
 async function boot() {
   resize();
   bridge.init({
-    onPause:  () => { sfx.chargeStop(); bridge.save(JSON.stringify({ best })); },
+    onPause:  () => { sfx.chargeStop(); bridge.save(JSON.stringify({ best, vol: volIndex })); },
     onResume: () => { prev = 0; },   // avoid a big dt spike after resume
     onAudio:  on => sfx.setEnabled(on),
   });
@@ -389,11 +459,16 @@ async function boot() {
   resetRun(); state = 'loading';
   requestAnimationFrame(frame);     // loading screen is the first frame
 
-  // restore best score (shown on the title screen)
+  // restore best score + volume (shown/used on the title screen)
   try {
     const raw = await bridge.load();
-    if (raw) { const d = JSON.parse(raw); if (d && typeof d.best === 'number') best = d.best; }
+    if (raw) {
+      const d = JSON.parse(raw);
+      if (d && typeof d.best === 'number') best = d.best;
+      if (d && typeof d.vol === 'number') volIndex = clamp(Math.round(d.vol), 0, VOL_LEVELS.length - 1);
+    }
   } catch (_) {}
+  sfx.setVolume(VOL_LEVELS[volIndex]);
   stepLoaded();
 
   // wait for sprites + font, then signal interactable
