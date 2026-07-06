@@ -116,7 +116,7 @@ function resetRun() {
   const p0 = getPlat();
   p0.left = -4; p0.right = C.playerX + 8; p0.top = C.baseTop; p0.scored = true; p0.active = true;
   platforms.push(p0);
-  player = { worldX: C.playerX, y: C.baseTop, vy: 0, grounded: true, cur: p0, charge: 0, charging: false, squash: 0 };
+  player = { worldX: C.playerX, y: C.baseTop, vy: 0, grounded: true, cur: p0, charge: 0, charging: false, squash: 0, jumped: false };
   cameraX = player.worldX - C.playerX;
   score = 0; combo = 0; state = 'play'; shake = 0; flash = 0; levelFlash = 0; dust.length = 0;
   while (platforms[platforms.length - 1].right < cameraX + VWU + 8) spawnNext();
@@ -141,6 +141,7 @@ function release() {
     sfx.jump(player.charge);
     player.vy = lerp(C.vyMin, C.vyMax, player.charge);
     player.grounded = false; player.charging = false; player.cur = null; player.charge = 0;
+    player.jumped = true;                    // only a real jump can land
   } else { if (player) player.charging = false; sfx.chargeStop(); }
 }
 cv.addEventListener('pointerdown', e => {
@@ -183,6 +184,7 @@ function step(dt) {
 
   if (player.grounded && player.worldX > player.cur.right) {
     player.grounded = false; player.charging = false; player.cur = null; // walked off the edge
+    player.jumped = false;                   // walk-off fall cannot land -> guaranteed drop
     sfx.chargeStop();
   }
 
@@ -190,7 +192,7 @@ function step(dt) {
     player.vy -= C.g * dt;
     player.y  += player.vy * dt;
     const feet = player.y;
-    if (player.vy < 0) {                       // land only while descending; forgiving edges
+    if (player.vy < 0 && player.jumped) {      // land only while descending, and only off a jump
       const pl = player.worldX - 0.5, pr = player.worldX + 0.5;
       for (const p of platforms) {
         if (!p.active) continue;
