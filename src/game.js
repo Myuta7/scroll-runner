@@ -129,7 +129,7 @@ function press() {
   sfx.unlock();                                     // user gesture: unlock audio
   if (state === 'loading') return;
   if (state === 'title') { resetRun(); startCharge(); return; }
-  if (state === 'dead')  { if (deadCooldown <= 0) resetRun(); return; }
+  if (state === 'dead')  { if (deadCooldown <= 0) { resetRun(); state = 'title'; } return; }  // back to title
   if (player.grounded) startCharge();
 }
 function startCharge() {
@@ -219,7 +219,7 @@ function onLand(p, cx) {
   p.scored = true; cleared++;
   const center = (p.left + p.right) / 2, third = (p.right - p.left) / 6;
   const perfect = Math.abs(cx - center) <= third;
-  if (perfect) { combo++; flash = 0.6; sfx.perfect(); } else { combo = 0; sfx.land(); }
+  if (perfect) { combo++; flash = 0.6; sfx.perfect(); } else { combo = 0; sfx.sparkle(); }
   score += multiplier();
   if (score > best) best = score;
   shake = Math.min(1, shake + 0.4);
@@ -370,7 +370,7 @@ function render() {
     if (state === 'dead') {
       ctx.fillStyle = PAL.c12; ctx.fillText(`SCORE ${score}`, CW / 2, CH * 0.36 + fs * 2);
       ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, CH * 0.36 + fs * 3.2);
-      ctx.fillStyle = PAL.c11; ctx.fillText('TAP TO RETRY', CW / 2, CH * 0.36 + fs * 4.6);
+      ctx.fillStyle = PAL.c11; ctx.fillText('TAP TO TITLE', CW / 2, CH * 0.36 + fs * 4.6);
     } else {
       ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, CH * 0.36 + fs * 2);
       ctx.fillStyle = PAL.c11; ctx.fillText('TAP / SPACE TO START', CW / 2, CH * 0.36 + fs * 3.4);

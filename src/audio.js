@@ -62,9 +62,41 @@ export const sfx = {
     chargeOsc = chargeGain = null;
   },
 
-  jump(t)  { this.chargeStop(); note(240 + 220 * t, 0, 0.12, { vol: 0.5, slideTo: 420 + 220 * t }); },
+  // "boing" — springy jump: pitch snaps up then wobbles down (decaying vibrato)
+  jump(t) {
+    this.chargeStop();
+    const c = ensure(); if (!c) return;
+    const t0 = c.currentTime, dur = 0.35;
+    const f0 = 170 + 150 * t;                       // bigger charge = higher boing
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(f0 * 2.2, t0);
+    o.frequency.exponentialRampToValueAtTime(f0, t0 + 0.09);
+    const lfo = c.createOscillator(), lg = c.createGain();  // spring wobble
+    lfo.type = 'sine'; lfo.frequency.value = 16;
+    lg.gain.setValueAtTime(f0 * 0.4, t0);
+    lg.gain.exponentialRampToValueAtTime(1, t0 + dur);
+    lfo.connect(lg); lg.connect(o.frequency);
+    g.gain.setValueAtTime(0.5, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+    lfo.start(t0); lfo.stop(t0 + dur + 0.02);
+  },
   land()   { note(150, 0, 0.06, { vol: 0.45, slideTo: 90 }); },
-  perfect(){ note(660, 0, 0.06, { vol: 0.35 }); note(990, 0.06, 0.10, { vol: 0.35 }); },
+  // "キラーン" — bright ascending sparkle on a successful hop
+  sparkle(){
+    note(1568, 0,    0.05, { type: 'sine', vol: 0.30 });
+    note(2093, 0.05, 0.06, { type: 'sine', vol: 0.28 });
+    note(3136, 0.11, 0.24, { type: 'sine', vol: 0.25 });
+  },
+  // perfect landing = richer, longer sparkle
+  perfect(){
+    note(1568, 0,    0.05, { type: 'sine', vol: 0.32 });
+    note(2093, 0.05, 0.05, { type: 'sine', vol: 0.30 });
+    note(2637, 0.10, 0.06, { type: 'sine', vol: 0.28 });
+    note(3951, 0.16, 0.30, { type: 'sine', vol: 0.26 });
+  },
   levelUp(){ note(523, 0, 0.08, { vol: 0.4 }); note(659, 0.09, 0.08, { vol: 0.4 }); note(784, 0.18, 0.16, { vol: 0.4 }); },
   die()    { this.chargeStop(); note(300, 0, 0.5, { type: 'sawtooth', vol: 0.35, slideTo: 40 }); },
 

@@ -9,18 +9,18 @@ export const CONFIG = {
   vyMin:  6.5,  // jump initial speed at charge 0 (tap)   -> d = v * 2*Vy/g
   vyMax:  19,   // jump initial speed at full charge (same apex as before, ~27% more airtime)
   chargeT:1.0,  // seconds to reach full charge (long, readable gauge)
-  baseV:  5,    // scroll speed at level 1 (u/s)
+  baseV:  4,    // scroll speed at level 1 (u/s) — slow, relaxed start
 
   // --- platform generation (units) ---
-  wMin:   2.2, wMax: 6.5,   // platform width range (generous at Lv1)
-  gapMin: 1.5, gapMax: 2.8, // gap range at Lv1
+  wMin:   3.5, wMax: 8.0,   // platform width range (long, easy at Lv1)
+  gapMin: 2.2, gapMax: 3.4, // gap range at Lv1 (wide gaps = big floaty jumps)
   dyMax:  1.5,              // max height delta (+/- u)
 
   // --- difficulty progression (gentle: one level = a small step) ---
   levelEvery: 10,   // platforms cleared per level
   speedMul:   1.03, // scroll multiplier per level
   speedCap:   1.8,  // max multiplier over baseV
-  wDecay:     0.12, // platform max width shrink per level
+  wDecay:     0.25, // platform max width shrink per level
   wFloor:     2.4,  // platform max width never below this
   gapGrow:    0.05, // gap max growth per level
   gapCap:     4.2,  // gap max never above this
