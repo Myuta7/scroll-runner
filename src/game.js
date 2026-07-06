@@ -277,12 +277,19 @@ function pickFrame() {
   return (Math.floor(player.worldX / C.runStep) % 2 === 0) ? sprites.right : sprites.left;
 }
 
+// overlay text block anchor: 36% of screen in landscape, shifted up in
+// portrait (where the field is centered) so the character stays visible
+const overlayY = () => Math.max(CH * 0.10, CH * 0.36 - YOFF * U * 0.5);
+
 function render() {
-  // sky: three flat bands, colors follow the day-night cycle
+  // sky: three flat bands, colors follow the day-night cycle.
+  // Band edges are anchored to WORLD height (via sy) so the horizon colors
+  // hug the buildings/platforms on every aspect ratio, portrait included.
   const [skyTop, skyMid, skyLow] = skyColors();
-  ctx.fillStyle = skyTop; ctx.fillRect(0, 0, CW, CH * 0.55);
-  ctx.fillStyle = skyMid; ctx.fillRect(0, CH * 0.55, CW, CH * 0.20);
-  ctx.fillStyle = skyLow; ctx.fillRect(0, CH * 0.75, CW, CH * 0.25);
+  const hMid = sy(8), hLow = sy(4.5);
+  ctx.fillStyle = skyTop; ctx.fillRect(0, 0, CW, hMid);
+  ctx.fillStyle = skyMid; ctx.fillRect(0, hMid, CW, hLow - hMid);
+  ctx.fillStyle = skyLow; ctx.fillRect(0, hLow, CW, CH - hLow);
   // far parallax blocks
   ctx.fillStyle = PAL.c15;
   const bw = Math.round(2.8 * U), by = sy(1.6);
@@ -371,18 +378,19 @@ function render() {
   }
 
   if (state === 'title' || state === 'dead') {
+    const oy = overlayY();
     ctx.fillStyle = 'rgba(26,28,44,.72)'; ctx.fillRect(0, 0, CW, CH);
     ctx.textAlign = 'center';
     ctx.fillStyle = PAL.c04; ctx.font = `${Math.round(fs * 1.4)}px "PressStart2P", monospace`;
-    ctx.fillText(state === 'dead' ? 'GAME OVER' : 'SCROLL RUNNER', CW / 2, CH * 0.36);
+    ctx.fillText(state === 'dead' ? 'GAME OVER' : 'SCROLL RUNNER', CW / 2, oy);
     ctx.font = `${Math.max(6, Math.round(fs * 0.8))}px "PressStart2P", monospace`;
     if (state === 'dead') {
-      ctx.fillStyle = PAL.c12; ctx.fillText(`SCORE ${score}`, CW / 2, CH * 0.36 + fs * 2);
-      ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, CH * 0.36 + fs * 3.2);
-      ctx.fillStyle = PAL.c11; ctx.fillText('TAP TO TITLE', CW / 2, CH * 0.36 + fs * 4.6);
+      ctx.fillStyle = PAL.c12; ctx.fillText(`SCORE ${score}`, CW / 2, oy + fs * 2);
+      ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, oy + fs * 3.2);
+      ctx.fillStyle = PAL.c11; ctx.fillText('TAP TO TITLE', CW / 2, oy + fs * 4.6);
     } else {
-      ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, CH * 0.36 + fs * 2);
-      ctx.fillStyle = PAL.c11; ctx.fillText('TAP / SPACE TO START', CW / 2, CH * 0.36 + fs * 3.4);
+      ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, oy + fs * 2);
+      ctx.fillStyle = PAL.c11; ctx.fillText('TAP / SPACE TO START', CW / 2, oy + fs * 3.4);
       renderVolumeButtons(fs);
     }
     ctx.textAlign = 'left';
@@ -395,7 +403,7 @@ function renderVolumeButtons(fs) {
   const gap = Math.max(2, Math.round(fs * 0.4));
   const totW = bw * 4 + gap * 3;
   let bx = Math.round((CW - totW) / 2);
-  const by = Math.round(CH * 0.36 + fs * 5.4);
+  const by = Math.round(overlayY() + fs * 5.4);
   volBtns.length = 0;
   ctx.font = `${Math.max(6, Math.round(fs * 0.6))}px "PressStart2P", monospace`;
   ctx.fillStyle = PAL.c13;
@@ -413,12 +421,13 @@ function renderVolumeButtons(fs) {
 
 function renderLoading() {
   const fs = Math.max(7, Math.round(Math.min(CW, CH) * 0.045)); // short side: stays readable in portrait
+  const oy = overlayY();
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillStyle = PAL.c04; ctx.font = `${Math.round(fs * 1.4)}px "PressStart2P", monospace`;
-  ctx.fillText('SCROLL RUNNER', CW / 2, CH * 0.36);
+  ctx.fillText('SCROLL RUNNER', CW / 2, oy);
   // progress bar
   const bw = Math.round(CW * 0.4), bh = 6;
-  const bx = Math.round((CW - bw) / 2), byy = Math.round(CH * 0.36 + fs * 2.4);
+  const bx = Math.round((CW - bw) / 2), byy = Math.round(oy + fs * 2.4);
   ctx.fillStyle = PAL.c15; ctx.fillRect(bx, byy, bw, bh);
   ctx.fillStyle = PAL.c11; ctx.fillRect(bx, byy, Math.round(bw * loadProgress), bh);
   ctx.fillStyle = PAL.c13; ctx.font = `${Math.max(6, Math.round(fs * 0.7))}px "PressStart2P", monospace`;
