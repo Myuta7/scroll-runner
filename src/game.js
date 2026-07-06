@@ -69,7 +69,6 @@ function refreshLevel() {
   curV  = C.baseV * Math.min(C.speedCap, Math.pow(C.speedMul, level - 1));
 }
 const effWidthMax = () => Math.max(C.wFloor, C.wMax - (level - 1) * C.wDecay);
-const effGapMax   = () => Math.min(C.gapCap, C.gapMax + (level - 1) * C.gapGrow);
 
 // time to descend back to height h2, launching at h1 with vy
 function landTime(vy, h1, h2) {
@@ -82,8 +81,9 @@ function reachAt(charge, h1, h2) {
   const t = landTime(vy, h1, h2);
   return t === null ? -1 : curV * t;
 }
+// landable with a charge no higher than cMaxLand — full-charge demands are unfair
 function reachable(h1, gap, h2, width) {
-  for (let c = 0; c <= 1.0001; c += 0.02) {
+  for (let c = 0; c <= C.cMaxLand + 0.0001; c += 0.02) {
     const d = reachAt(c, h1, h2);
     if (d >= gap && d <= gap + width) return true;
   }
@@ -92,18 +92,22 @@ function reachable(h1, gap, h2, width) {
 
 function spawnNext() {
   const last = platforms[platforms.length - 1];
-  const gMin = C.gapMin, gMax = Math.max(gMin, effGapMax());
   const wMax = effWidthMax(), wMin = Math.min(C.wMin, wMax);
+  // flat-landing jump distance for a given charge at the current speed
+  const dAt = c => curV * 2 * lerp(C.vyMin, C.vyMax, c) / C.g;
+  const wideP = Math.min(C.widePMax, C.wideP0 + (level - 1) * C.widePGrow);
   let gap, dy, w, top, tries = 0;
   do {
-    gap = lerp(gMin, gMax, Math.random());
+    // pick how much charge this gap should demand; wide hops mix in more with level
+    const [cLo, cHi] = Math.random() < wideP ? C.gapCWide : C.gapCNorm;
+    gap = Math.max(C.gapMin, dAt(lerp(cLo, cHi, Math.random())) * C.gapMargin);
     dy  = (Math.random() * 2 - 1) * C.dyMax;
     top = clamp(last.top + dy, C.baseTop - 2.5, C.baseTop + 3);
     w   = lerp(wMin, wMax, Math.random());
     tries++;
   } while (!reachable(last.top, gap, top, w) && tries < 40);
   if (!reachable(last.top, gap, top, w)) {
-    for (let gg = gMin; gg <= gMax; gg += 0.1) { if (reachable(last.top, gg, top, w)) { gap = gg; break; } }
+    for (let gg = C.gapMin; gg <= gap; gg += 0.1) { if (reachable(last.top, gg, top, w)) { gap = gg; break; } }
   }
   const p = getPlat();
   p.left = last.right + gap; p.right = p.left + w; p.top = top;

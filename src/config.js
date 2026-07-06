@@ -13,8 +13,18 @@ export const CONFIG = {
 
   // --- platform generation (units) ---
   wMin:   3.5, wMax: 8.0,   // platform width range (long, easy at Lv1)
-  gapMin: 2.2, gapMax: 3.4, // gap range at Lv1 (wide gaps = big floaty jumps)
   dyMax:  1.5,              // max height delta (+/- u)
+
+  // gaps are generated from CHARGE TARGETS so they scale with scroll speed
+  // (a fixed-unit gap becomes trivially hoppable once speed rises)
+  gapMin:    2.2,           // absolute floor (u)
+  gapCNorm:  [0.15, 0.50],  // normal hop: charge range this gap should demand
+  gapCWide:  [0.55, 0.72],  // wide hop: ~70%-charge jumps
+  gapMargin: 0.9,           // gap = 90% of that charge's flat-landing distance
+  wideP0:    0.20,          // wide-hop probability at Lv1...
+  widePGrow: 0.06,          // ...growing per level...
+  widePMax:  0.55,          // ...up to this cap
+  cMaxLand:  0.85,          // every platform must be landable with <=85% charge (no full-charge demands)
 
   // --- difficulty progression (gentle: one level = a small step) ---
   levelEvery: 10,   // platforms cleared per level
@@ -22,8 +32,6 @@ export const CONFIG = {
   speedCap:   1.8,  // max multiplier over baseV
   wDecay:     0.25, // platform max width shrink per level
   wFloor:     2.4,  // platform max width never below this
-  gapGrow:    0.05, // gap max growth per level
-  gapCap:     4.2,  // gap max never above this
 
   // --- responsive layout (units) ---
   minFieldW: 24,  // guaranteed horizontal units visible (reaction window)
