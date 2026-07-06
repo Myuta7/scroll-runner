@@ -10,6 +10,18 @@ let ctx = null, master = null;
 let chargeOsc = null, chargeGain = null;
 let volume = 0.22;   // user-selected master volume (0 = sound off)
 
+// bundled jump sample (assets/sounds/jump.wav); falls back to the
+// procedural boing until it is fetched + decoded
+let jumpRaw = null, jumpBuf = null;
+
+function decodeJump() {
+  if (!ctx || jumpBuf || !jumpRaw) return;
+  const raw = jumpRaw; jumpRaw = null;          // decodeAudioData detaches the buffer
+  try {
+    ctx.decodeAudioData(raw, buf => { jumpBuf = buf; }, () => {});
+  } catch (_) {}
+}
+
 function ensure() {
   if (!bridge.audioEnabled || volume <= 0) return null;
   if (!ctx) {
@@ -19,6 +31,7 @@ function ensure() {
     master = ctx.createGain();
     master.gain.value = volume;
     master.connect(ctx.destination);
+    decodeJump();
   }
   if (ctx.state === 'suspended') { try { ctx.resume(); } catch (_) {} }
   return ctx;
@@ -62,10 +75,30 @@ export const sfx = {
     chargeOsc = chargeGain = null;
   },
 
-  // "boing" — springy jump: pitch snaps up then wobbles down (decaying vibrato)
+  // Fetch the bundled jump sample. Call once at boot; failure is fine
+  // (the procedural boing below stays as the fallback).
+  async preload(url) {
+    try {
+      const res = await fetch(url);
+      jumpRaw = await res.arrayBuffer();
+      decodeJump();
+    } catch (_) {}
+  },
+
+  // jump: play the bundled sample (slight pitch-up with charge);
+  // fallback "boing" — pitch snaps up then wobbles down (decaying vibrato)
   jump(t) {
     this.chargeStop();
     const c = ensure(); if (!c) return;
+    if (jumpBuf) {
+      const src = c.createBufferSource(), g = c.createGain();
+      src.buffer = jumpBuf;
+      src.playbackRate.value = 0.95 + 0.2 * t;   // fuller charge = slightly higher
+      g.gain.value = 0.9;
+      src.connect(g); g.connect(master);
+      src.start();
+      return;
+    }
     const t0 = c.currentTime, dur = 0.35;
     const f0 = 170 + 150 * t;                       // bigger charge = higher boing
     const o = c.createOscillator(), g = c.createGain();

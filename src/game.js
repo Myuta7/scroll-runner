@@ -450,6 +450,7 @@ function loadSprite(name) {
 
 async function boot() {
   resize();
+  sfx.preload('./assets/sounds/jump.wav');   // bundled jump SFX (non-blocking)
   bridge.init({
     onPause:  () => { sfx.chargeStop(); bridge.save(JSON.stringify({ best, vol: volIndex })); },
     onResume: () => { prev = 0; },   // avoid a big dt spike after resume
