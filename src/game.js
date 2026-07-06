@@ -15,6 +15,7 @@ const ctx = cv.getContext('2d');
 let CW = 0, CH = 0;   // internal canvas px (low-res)
 let U  = 12;          // px per unit (derived)
 let VWU = 32, VHU = 18;
+let YOFF = 0;         // vertical centering offset (u): portrait has spare height
 
 function resize() {
   const vpW = Math.max(1, window.innerWidth);
@@ -35,6 +36,8 @@ function resize() {
   U   = Math.min(ih / C.minFieldH, iw / C.minFieldW);
   VWU = iw / U;
   VHU = ih / U;
+  // center the gameplay band vertically when there is spare height (portrait)
+  YOFF = Math.max(0, (VHU - C.minFieldH) / 2);
 }
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', resize);
@@ -244,7 +247,7 @@ function die() {
 
 // ---- render ------------------------------------------------------------
 const sx = wx => Math.round((wx - cameraX) * U);
-const sy = wy => Math.round(CH - wy * U);
+const sy = wy => Math.round(CH - (wy + YOFF) * U);
 
 // Day-night cycle: sky shifts with level progress
 // night -> dawn -> morning -> noon -> evening -> night (repeats every 6 levels)
