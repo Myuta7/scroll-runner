@@ -1,14 +1,18 @@
-# Scroll Runner — YouTube Playables build scaffold
+# Scroll Runner — YouTube Playables build
 
 One-button charge-jump auto-runner. Pure HTML5 + Canvas (no engine, no build step).
-This is the submission-oriented scaffold; continue development from here in Claude Code.
+
+**Play (test deploy): https://myuta7.github.io/scroll-runner/**
+
+Features: charge jump with low-gravity floaty arcs, procedural WebAudio SFX,
+title-screen volume selector (OFF/LOW/MID/HIGH, persisted), day-night sky cycle
+tied to level progression, loading screen, persistent high score.
 
 ## Run locally
 
 ES modules require a server (not `file://`):
 
 ```bash
-cd scroll-runner
 python -m http.server 8000
 # open http://localhost:8000
 ```
