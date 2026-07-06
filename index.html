@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Scroll Runner</title>
+
+<!--
+  ============================================================
+  YouTube Playables SDK
+  MUST be loaded BEFORE any game code (validated at certification).
+  Paste the official SDK <script> tag from the Playables Developer
+  Portal / "Getting started" page here. Until then the game runs
+  standalone via the fallback in src/bridge.js.
+
+  <script src="PASTE_OFFICIAL_YTGAME_SDK_URL_HERE"></script>
+  ============================================================
+-->
+
+<style>
+  @font-face{
+    font-family:"PressStart2P";
+    src:url("./assets/fonts/press-start-2p.woff2") format("woff2");
+    font-display:swap;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{
+    width:100%;height:100%;background:#1a1c2c;overflow:hidden;
+    /* respect notches, never lock orientation */
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  #game{
+    display:block;width:100%;height:100%;
+    image-rendering:pixelated;image-rendering:crisp-edges;
+    touch-action:none;               /* we handle input ourselves */
+    background:#1a1c2c;
+  }
+</style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <script type="module" src="./src/game.js"></script>
+</body>
+</html>

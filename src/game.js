@@ -1,0 +1,409 @@
+// ============================================================
+// Scroll Runner — core game
+// One-button charge-jump auto-runner. World is in "units";
+// the view fills any viewport (portrait or landscape) while
+// guaranteeing a minimum visible field, so difficulty stays fair.
+// ============================================================
+import { CONFIG as C, PAL } from './config.js';
+import { bridge } from './bridge.js';
+import { sfx } from './audio.js';
+
+const cv  = document.getElementById('game');
+const ctx = cv.getContext('2d');
+
+// ---- responsive sizing -------------------------------------------------
+let CW = 0, CH = 0;   // internal canvas px (low-res)
+let U  = 12;          // px per unit (derived)
+let VWU = 32, VHU = 18;
+
+function resize() {
+  const vpW = Math.max(1, window.innerWidth);
+  const vpH = Math.max(1, window.innerHeight);
+  const ar  = vpW / vpH;
+
+  let iw, ih;
+  if (ar >= 1) { ih = C.shortSide; iw = Math.round(C.shortSide * ar); }
+  else         { iw = C.shortSide; ih = Math.round(C.shortSide / ar); }
+
+  const long = Math.max(iw, ih);
+  if (long > C.maxLongSide) { const s = C.maxLongSide / long; iw = Math.round(iw * s); ih = Math.round(ih * s); }
+
+  cv.width = iw; cv.height = ih; CW = iw; CH = ih;
+  ctx.imageSmoothingEnabled = false;
+
+  // pick U so BOTH minimum fields are guaranteed; extra space becomes sky/runway
+  U   = Math.min(ih / C.minFieldH, iw / C.minFieldW);
+  VWU = iw / U;
+  VHU = ih / U;
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', resize);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+// ---- world state -------------------------------------------------------
+let platforms = [], pool = [];
+let player, cameraX, state, score, best = 0, combo, cleared, level, curV;
+let shake = 0, flash = 0, dust = [];
+let levelFlash = 0;      // level-up palette flash + label timer
+let deadCooldown = 0;    // input lockout right after death (no accidental retry)
+let loadProgress = 0;    // 0..1 for the loading screen
+const sprites = { idle: null, right: null, left: null, jump: null };
+
+const lerp  = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+function makePlat() { return { left: 0, right: 0, top: 0, scored: false, active: false }; }
+function getPlat()  { return pool.pop() || makePlat(); }
+function freePlat(p){ p.active = false; pool.push(p); }
+
+function refreshLevel() {
+  const nl = 1 + Math.floor(cleared / C.levelEvery);
+  if (state === 'play' && level && nl > level) { levelFlash = 1.2; sfx.levelUp(); }
+  level = nl;
+  curV  = C.baseV * Math.min(C.speedCap, Math.pow(C.speedMul, level - 1));
+}
+const effWidthMax = () => Math.max(C.wFloor, C.wMax - (level - 1) * C.wDecay);
+const effGapMax   = () => Math.min(C.gapCap, C.gapMax + (level - 1) * C.gapGrow);
+
+// time to descend back to height h2, launching at h1 with vy
+function landTime(vy, h1, h2) {
+  const disc = vy * vy - 2 * C.g * (h2 - h1);
+  if (disc < 0) return null;
+  return (vy + Math.sqrt(disc)) / C.g;
+}
+function reachAt(charge, h1, h2) {
+  const vy = lerp(C.vyMin, C.vyMax, charge);
+  const t = landTime(vy, h1, h2);
+  return t === null ? -1 : curV * t;
+}
+function reachable(h1, gap, h2, width) {
+  for (let c = 0; c <= 1.0001; c += 0.02) {
+    const d = reachAt(c, h1, h2);
+    if (d >= gap && d <= gap + width) return true;
+  }
+  return false;
+}
+
+function spawnNext() {
+  const last = platforms[platforms.length - 1];
+  const gMin = C.gapMin, gMax = Math.max(gMin, effGapMax());
+  const wMax = effWidthMax(), wMin = Math.min(C.wMin, wMax);
+  let gap, dy, w, top, tries = 0;
+  do {
+    gap = lerp(gMin, gMax, Math.random());
+    dy  = (Math.random() * 2 - 1) * C.dyMax;
+    top = clamp(last.top + dy, C.baseTop - 2.5, C.baseTop + 3);
+    w   = lerp(wMin, wMax, Math.random());
+    tries++;
+  } while (!reachable(last.top, gap, top, w) && tries < 40);
+  if (!reachable(last.top, gap, top, w)) {
+    for (let gg = gMin; gg <= gMax; gg += 0.1) { if (reachable(last.top, gg, top, w)) { gap = gg; break; } }
+  }
+  const p = getPlat();
+  p.left = last.right + gap; p.right = p.left + w; p.top = top;
+  p.scored = false; p.active = true; platforms.push(p);
+}
+
+function resetRun() {
+  platforms.forEach(freePlat); platforms.length = 0;
+  cleared = 0; refreshLevel();
+  const p0 = getPlat();
+  p0.left = -4; p0.right = C.playerX + 8; p0.top = C.baseTop; p0.scored = true; p0.active = true;
+  platforms.push(p0);
+  player = { worldX: C.playerX, y: C.baseTop, vy: 0, grounded: true, cur: p0, charge: 0, charging: false, squash: 0 };
+  cameraX = player.worldX - C.playerX;
+  score = 0; combo = 0; state = 'play'; shake = 0; flash = 0; levelFlash = 0; dust.length = 0;
+  while (platforms[platforms.length - 1].right < cameraX + VWU + 8) spawnNext();
+}
+
+const multiplier = () => clamp(1 + Math.floor(combo / 5), 1, 4);
+
+// ---- input -------------------------------------------------------------
+function press() {
+  sfx.unlock();                                     // user gesture: unlock audio
+  if (state === 'loading') return;
+  if (state === 'title') { resetRun(); startCharge(); return; }
+  if (state === 'dead')  { if (deadCooldown <= 0) resetRun(); return; }
+  if (player.grounded) startCharge();
+}
+function startCharge() {
+  player.charging = true;
+  sfx.chargeStart();
+}
+function release() {
+  if (state === 'play' && player.grounded && player.charging) {
+    sfx.jump(player.charge);
+    player.vy = lerp(C.vyMin, C.vyMax, player.charge);
+    player.grounded = false; player.charging = false; player.cur = null; player.charge = 0;
+  } else { if (player) player.charging = false; sfx.chargeStop(); }
+}
+cv.addEventListener('pointerdown', e => { e.preventDefault(); press(); });
+window.addEventListener('pointerup', release);
+cv.addEventListener('pointercancel', release);
+window.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) press(); } });
+window.addEventListener('keyup',   e => { if (e.code === 'Space') { e.preventDefault(); release(); } });
+
+// ---- update ------------------------------------------------------------
+function step(dt) {
+  deadCooldown = Math.max(0, deadCooldown - dt);
+  if (state !== 'play') return;
+  refreshLevel();
+
+  if (player.grounded && player.charging) {
+    player.charge = clamp(player.charge + dt / C.chargeT, 0, 1);
+    sfx.chargeLevel(player.charge);
+  }
+
+  player.worldX += curV * dt;                 // constant auto-scroll
+  cameraX = player.worldX - C.playerX;
+
+  if (player.grounded && player.worldX > player.cur.right) {
+    player.grounded = false; player.charging = false; player.cur = null; // walked off the edge
+    sfx.chargeStop();
+  }
+
+  if (!player.grounded) {
+    player.vy -= C.g * dt;
+    player.y  += player.vy * dt;
+    const feet = player.y;
+    if (player.vy < 0) {                       // land only while descending; forgiving edges
+      const pl = player.worldX - 0.5, pr = player.worldX + 0.5;
+      for (const p of platforms) {
+        if (!p.active) continue;
+        if (pr > p.left && pl < p.right && feet <= p.top && feet > p.top - 1.4) {
+          player.y = p.top; player.vy = 0; player.grounded = true; player.cur = p;
+          player.squash = 1; onLand(p, player.worldX); break;
+        }
+      }
+    }
+    if (player.y < -C.spriteH) { die(); return; } // fell off the bottom edge
+  }
+
+  player.squash = Math.max(0, player.squash - dt * 6);
+  shake = Math.max(0, shake - dt * 3);
+  flash = Math.max(0, flash - dt * 3);
+  levelFlash = Math.max(0, levelFlash - dt * 1.2);
+  for (const d of dust) { d.x += d.vx * dt; d.y += d.vy * dt; d.vy -= 20 * dt; d.life -= dt; }
+  dust = dust.filter(d => d.life > 0);
+
+  while (platforms.length && platforms[0].right < cameraX - 4) freePlat(platforms.shift());
+  while (platforms[platforms.length - 1].right < cameraX + VWU + 8) spawnNext();
+}
+
+function onLand(p, cx) {
+  if (p.scored) return;
+  p.scored = true; cleared++;
+  const center = (p.left + p.right) / 2, third = (p.right - p.left) / 6;
+  const perfect = Math.abs(cx - center) <= third;
+  if (perfect) { combo++; flash = 0.6; sfx.perfect(); } else { combo = 0; sfx.land(); }
+  score += multiplier();
+  if (score > best) best = score;
+  shake = Math.min(1, shake + 0.4);
+  for (let i = 0; i < 6; i++) dust.push({ x: cx, y: p.top, vx: (Math.random() * 2 - 1) * 4, vy: Math.random() * 3, life: 0.3 + Math.random() * 0.2, c: perfect ? PAL.c04 : PAL.c12 });
+}
+
+function die() {
+  state = 'dead';
+  deadCooldown = 0.4;
+  if (score > best) best = score;
+  shake = 1;
+  sfx.die();
+  bridge.sendScore(score);                 // score of THIS play (Playables semantics)
+  bridge.save(JSON.stringify({ best }));   // persist high score
+}
+
+// ---- render ------------------------------------------------------------
+const sx = wx => Math.round((wx - cameraX) * U);
+const sy = wy => Math.round(CH - wy * U);
+
+function pickFrame() {
+  if (state !== 'play') return sprites.idle;
+  if (!player.grounded) return sprites.jump;
+  return (Math.floor(player.worldX / C.runStep) % 2 === 0) ? sprites.right : sprites.left;
+}
+
+function render() {
+  // sky: three flat pixel bands (positions relative to canvas height)
+  ctx.fillStyle = PAL.c08; ctx.fillRect(0, 0, CW, CH * 0.55);
+  ctx.fillStyle = PAL.c09; ctx.fillRect(0, CH * 0.55, CW, CH * 0.20);
+  ctx.fillStyle = PAL.c14; ctx.fillRect(0, CH * 0.75, CW, CH * 0.25);
+  // far parallax blocks
+  ctx.fillStyle = PAL.c15;
+  const bw = Math.round(2.8 * U), by = sy(1.6);
+  for (let i = 0; i < 10; i++) {
+    const span = CW + bw * 2;
+    const bx = ((i * (bw + 40) - cameraX * U * 0.3) % span + span) % span - bw;
+    ctx.fillRect(Math.round(bx), by, bw, Math.round(2 * U));
+  }
+
+  // dedicated loading screen (before anything is playable)
+  if (state === 'loading') { renderLoading(); return; }
+
+  ctx.save();
+  if (shake > 0) ctx.translate(Math.round((Math.random() * 2 - 1) * shake * 3), Math.round((Math.random() * 2 - 1) * shake * 3));
+
+  // platforms: thin row of connected square blocks
+  const TS = Math.max(3, Math.round(C.tileU * U));
+  for (const p of platforms) {
+    if (!p.active) continue;
+    const x0 = sx(p.left), x1 = sx(p.right), top = sy(p.top);
+    ctx.fillStyle = PAL.c15; ctx.fillRect(x0 + 1, top + TS, x1 - x0, 1);
+    for (let tx = x0; tx < x1; tx += TS) {
+      const tw = Math.min(TS, x1 - tx);
+      ctx.fillStyle = PAL.c06; ctx.fillRect(tx, top, tw, TS);
+      ctx.fillStyle = PAL.c05; ctx.fillRect(tx, top, tw, 2);
+      ctx.fillStyle = PAL.c07; ctx.fillRect(tx, top, 1, TS);
+      ctx.fillStyle = PAL.c07; ctx.fillRect(tx, top + TS - 1, tw, 1);
+    }
+    ctx.fillStyle = PAL.c07; ctx.fillRect(x1 - 1, top, 1, TS);
+    const cz = (p.right - p.left) / 6;
+    ctx.fillStyle = PAL.c04; ctx.fillRect(sx((p.left + p.right) / 2 - cz), top - 2, Math.max(2, Math.round(cz * 2 * U)), 1);
+  }
+
+  for (const d of dust) { ctx.fillStyle = d.c; ctx.fillRect(sx(d.x), sy(d.y), 2, 2); }
+
+  // player
+  const sq = player.squash;
+  const footY = sy(player.y), midX = sx(player.worldX);
+  let gaugeTop = footY - Math.round(C.spriteH * U);
+  const img = pickFrame();
+  if (img && img.__ready) {
+    const h = Math.round(C.spriteH * U * (1 - sq * 0.20));
+    const w = Math.round(h * (img.naturalWidth / img.naturalHeight) * (1 + sq * 0.20));
+    const dx = Math.round(midX - w / 2), dy = Math.round(footY - h);
+    ctx.drawImage(img, dx, dy, w, h);
+    gaugeTop = dy;
+  } else {
+    const pw = 1 * U * (1 + sq * 0.4), ph = 1.4 * U * (1 - sq * 0.35);
+    ctx.fillStyle = PAL.c04; ctx.fillRect(Math.round(midX - pw / 2), Math.round(footY - ph), Math.round(pw), Math.round(ph));
+    gaugeTop = Math.round(footY - ph);
+  }
+
+  // charge gauge (wide bar with frame, above the player)
+  if (player.charging) {
+    const gw = Math.round(C.gaugeW * U), gh = 5;
+    const gx = Math.round(midX - gw / 2), gy = gaugeTop - Math.round(0.7 * U);
+    ctx.fillStyle = PAL.c00; ctx.fillRect(gx - 1, gy - 1, gw + 2, gh + 2); // frame
+    ctx.fillStyle = PAL.c15; ctx.fillRect(gx, gy, gw, gh);
+    const c = player.charge;
+    ctx.fillStyle = c < 0.5 ? PAL.c11 : c < 0.85 ? PAL.c04 : PAL.c03;
+    ctx.fillRect(gx, gy, Math.round(gw * c), gh);
+  }
+
+  ctx.restore();
+
+  if (flash > 0) { ctx.fillStyle = `rgba(255,205,117,${flash * 0.25})`; ctx.fillRect(0, 0, CW, CH); }
+  if (levelFlash > 0) { ctx.fillStyle = `rgba(115,239,247,${Math.min(1, levelFlash) * 0.18})`; ctx.fillRect(0, 0, CW, CH); }
+
+  // HUD (scales with canvas)
+  const fs = Math.max(7, Math.round(CH * 0.045));
+  ctx.font = `${fs}px "PressStart2P", monospace`;
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = PAL.c12; ctx.fillText(`SCORE ${score}`, 6, 6);
+  ctx.fillStyle = PAL.c11; ctx.fillText(`LV ${level}`, 6, 6 + fs + 4);
+  const m = multiplier();
+  if (m > 1 && state === 'play') { ctx.fillStyle = PAL.c04; ctx.fillText(`x${m}`, 6, 6 + (fs + 4) * 2); }
+  ctx.textAlign = 'right'; ctx.fillStyle = PAL.c13; ctx.fillText(`BEST ${best}`, CW - 6, 6); ctx.textAlign = 'left';
+
+  // level-up banner
+  if (levelFlash > 0 && state === 'play') {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = PAL.c11;
+    ctx.font = `${fs}px "PressStart2P", monospace`;
+    ctx.fillText(`LEVEL ${level}`, CW / 2, Math.round(CH * 0.18));
+    ctx.textAlign = 'left';
+  }
+
+  if (state === 'title' || state === 'dead') {
+    ctx.fillStyle = 'rgba(26,28,44,.72)'; ctx.fillRect(0, 0, CW, CH);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = PAL.c04; ctx.font = `${Math.round(fs * 1.4)}px "PressStart2P", monospace`;
+    ctx.fillText(state === 'dead' ? 'GAME OVER' : 'SCROLL RUNNER', CW / 2, CH * 0.36);
+    ctx.font = `${Math.max(6, Math.round(fs * 0.8))}px "PressStart2P", monospace`;
+    if (state === 'dead') {
+      ctx.fillStyle = PAL.c12; ctx.fillText(`SCORE ${score}`, CW / 2, CH * 0.36 + fs * 2);
+      ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, CH * 0.36 + fs * 3.2);
+      ctx.fillStyle = PAL.c11; ctx.fillText('TAP TO RETRY', CW / 2, CH * 0.36 + fs * 4.6);
+    } else {
+      ctx.fillStyle = PAL.c04; ctx.fillText(`HI SCORE ${best}`, CW / 2, CH * 0.36 + fs * 2);
+      ctx.fillStyle = PAL.c11; ctx.fillText('TAP / SPACE TO START', CW / 2, CH * 0.36 + fs * 3.4);
+    }
+    ctx.textAlign = 'left';
+  }
+}
+
+function renderLoading() {
+  const fs = Math.max(7, Math.round(CH * 0.045));
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillStyle = PAL.c04; ctx.font = `${Math.round(fs * 1.4)}px "PressStart2P", monospace`;
+  ctx.fillText('SCROLL RUNNER', CW / 2, CH * 0.36);
+  // progress bar
+  const bw = Math.round(CW * 0.4), bh = 6;
+  const bx = Math.round((CW - bw) / 2), byy = Math.round(CH * 0.36 + fs * 2.4);
+  ctx.fillStyle = PAL.c15; ctx.fillRect(bx, byy, bw, bh);
+  ctx.fillStyle = PAL.c11; ctx.fillRect(bx, byy, Math.round(bw * loadProgress), bh);
+  ctx.fillStyle = PAL.c13; ctx.font = `${Math.max(6, Math.round(fs * 0.7))}px "PressStart2P", monospace`;
+  ctx.fillText('LOADING...', CW / 2, byy + bh + 6);
+  ctx.textAlign = 'left';
+}
+
+// ---- main loop (fixed timestep, pause-aware) ---------------------------
+let acc = 0, prev = 0, firstFrameSent = false;
+const FIXED = 1 / 120;
+function frame(now) {
+  if (!prev) prev = now;
+  let dt = (now - prev) / 1000; prev = now; dt = Math.min(dt, 0.1);
+
+  if (!bridge.paused) {
+    acc += dt; let guard = 0;
+    while (acc >= FIXED && guard++ < 8) { step(FIXED); acc -= FIXED; }
+  }
+  render();
+
+  if (!firstFrameSent) { firstFrameSent = true; bridge.firstFrameReady(); }
+  requestAnimationFrame(frame);
+}
+
+// ---- asset loading + boot ---------------------------------------------
+const LOAD_STEPS = 6; // 4 sprites + save data + font
+let loadedSteps = 0;
+function stepLoaded() { loadedSteps++; loadProgress = loadedSteps / LOAD_STEPS; }
+
+function loadSprite(name) {
+  return new Promise(res => {
+    const im = new Image();
+    im.onload = () => { im.__ready = true; sprites[name] = im; stepLoaded(); res(); };
+    im.onerror = () => { stepLoaded(); res(); }; // missing frame falls back to block
+    im.src = `./assets/sprites/${name}.png`;
+  });
+}
+
+async function boot() {
+  resize();
+  bridge.init({
+    onPause:  () => { sfx.chargeStop(); bridge.save(JSON.stringify({ best })); },
+    onResume: () => { prev = 0; },   // avoid a big dt spike after resume
+    onAudio:  on => sfx.setEnabled(on),
+  });
+
+  resetRun(); state = 'loading';
+  requestAnimationFrame(frame);     // loading screen is the first frame
+
+  // restore best score (shown on the title screen)
+  try {
+    const raw = await bridge.load();
+    if (raw) { const d = JSON.parse(raw); if (d && typeof d.best === 'number') best = d.best; }
+  } catch (_) {}
+  stepLoaded();
+
+  // wait for sprites + font, then signal interactable
+  await Promise.all(['idle', 'right', 'left', 'jump'].map(loadSprite));
+  try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (_) {}
+  stepLoaded();
+  loadProgress = 1;
+
+  state = 'title';
+  bridge.gameReady();               // interactable exactly now
+}
+
+boot();

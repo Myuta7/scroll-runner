@@ -1,0 +1,6 @@
+# delivery originals from the generation session (kept local only)
+files/
+files.zip
+
+# local tooling
+.claude/
