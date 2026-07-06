@@ -349,7 +349,7 @@ function render() {
   if (levelFlash > 0) { ctx.fillStyle = `rgba(115,239,247,${Math.min(1, levelFlash) * 0.18})`; ctx.fillRect(0, 0, CW, CH); }
 
   // HUD (scales with canvas)
-  const fs = Math.max(7, Math.round(CH * 0.045));
+  const fs = Math.max(7, Math.round(Math.min(CW, CH) * 0.045)); // short side: stays readable in portrait
   ctx.font = `${fs}px "PressStart2P", monospace`;
   ctx.textBaseline = 'top';
   ctx.fillStyle = PAL.c12; ctx.fillText(`SCORE ${score}`, 6, 6);
@@ -409,7 +409,7 @@ function renderVolumeButtons(fs) {
 }
 
 function renderLoading() {
-  const fs = Math.max(7, Math.round(CH * 0.045));
+  const fs = Math.max(7, Math.round(Math.min(CW, CH) * 0.045)); // short side: stays readable in portrait
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillStyle = PAL.c04; ctx.font = `${Math.round(fs * 1.4)}px "PressStart2P", monospace`;
   ctx.fillText('SCROLL RUNNER', CW / 2, CH * 0.36);
